@@ -1,0 +1,233 @@
+--Question 1: Fetch all the paintings which are not displayed on any museums?
+SELECT *
+FROM workdata
+where museum_id is null;
+
+--Question 2: Fetch all paintings  and count where style begins with letters B or C, Baroque (972), classicism (427), cubism(300):
+
+select w."style" style, COUNT(*)
+from workdata w 
+where "style" like 'B%' OR "style" like 'C%'
+group by "style"
+
+select *
+from workdata w 
+limit 2;
+
+
+--Question 3: Are there museums without any paintings?
+select * 
+from museum m
+where not exists (select * 
+from workdata w
+where m.museum_id = w.museum_id)
+
+--Question 4: Create a mock table with values, table named 'museum':
+--CREATE DATABASE pictures;
+
+--CREATE TABLE museum (
+    museum_id INT PRIMARY KEY,
+    name VARCHAR(100) NOT NULL
+);
+
+--INSERT INTO museum (museum_id, name)
+VALUES (1, 'The Louvre'),
+       (2, 'The Metropolitan Museum of Art');
+      
+--Question 5: How many paintings have an asking price of more than their regular price? 
+
+select count(*)
+from product_size ps 
+where 'sale_price' > 'regular_price';
+
+--Question 6:  Identify the paintings whose asking price is less than 50% of its regular price
+
+select * 
+	from product_size
+	where sale_price < (regular_price*0.5);
+
+--Question 7:  Identify the paintings whose asking price is less than 70% of its regular price
+
+select * 
+	from product_size
+	where sale_price < (regular_price*0.7);
+
+--Question 8: Which canvas costs the most: 1025 size id 9648
+
+select cs.label, cs.size_id, x.sale_price
+from (select *,
+rank() over (order by sale_price desc) as rank
+from product_size ps) x
+join canvas_size cs on cs.size_id = x.size_id
+where x.rank = 1;
+
+--Question 9: Delete duplicate records from work, product_size, subject and image_link tables:
+
+
+delete from workdata 
+	where ctid not in(select min(ctid)
+	from workdata 
+	group by "work_id"); -- 60 rows updated
+
+delete from product_size 
+	where ctid not in(select min(ctid)
+	from workdata 
+	group by "work_id", "size_id"); --2200
+
+
+delete from subject s
+	where ctid not in(select min(ctid)
+	from workdata
+	group by "work_id", "subject"); --2709
+
+delete from workdata
+	where ctid not in(select min(ctid)
+	from workdata 
+	group by "work_id"); --0
+	
+	
+--Question 10: Identify the museums with invalid city information in the given dataset
+	
+select distinct city
+from museum m ;
+
+select *
+from museum m 
+where city ~ '^[0-9]';
+
+-- Question 11: Museum_Hours table has 1 invalid entry. Identify it and remove it.
+
+SELECT *
+FROM (
+    SELECT *, 
+           ctid,
+           ROW_NUMBER() OVER (PARTITION BY museum_id, "day" ORDER BY ctid) AS row_num
+    FROM museum_hours
+) ranked_hours
+WHERE row_num > 1; 
+
+	delete from museum_hours 
+	where ctid not in (select min(ctid)
+						from museum_hours
+						group by museum_id, day )
+						
+
+--Question 12: Fetch the top 10 most famous painting subject --portraits:
+
+select *
+from (select s.subject, count(*) as subject_pop,
+	rank() over(order by count(*) desc) srank
+from  workdata w
+join subject s on w.work_id = s.work_id
+group by s.subject) x
+where x.srank <= 10;
+
+
+--Question 13: Who are the top 5 most popular artist? (Popularity is defined based on most no of paintings done by an artist)
+select * from artists a  limit 1;
+
+select * from workdata limit 1;
+
+select a.artist_id , count(1),
+rank() over(order by count(1) desc) as rnk
+from workdata w
+join artists a on w.artist_id = a.artist_id
+group by a.artist_id ;
+
+select a.artist_id, a.full_name, x.rnk --Renoir, Monet, Van Gogh, Utrillo, Marquet:
+from (
+	select a.artist_id , count(1),
+		rank() over(order by count(1) desc) as rnk
+		from workdata w
+		join artists a on w.artist_id = a.artist_id
+		group by a.artist_id
+		) x
+join artists a on x.artist_id = a.artist_id
+where x.rnk <= 5;
+
+
+select "label",ranking,no_of_paintings
+	from (
+		select cs.size_id,cs.label,count(1) as no_of_paintings
+		, dense_rank() over(order by count(1) ) as ranking
+		from workdata w
+		join product_size ps on ps.work_id=w.work_id
+		join canvas_size cs on cs.size_id::text = ps.size_id
+		group by cs.size_id,cs.label) x
+	where x.ranking<=3
+
+
+--Question 14: Display the 3 least popular canva sizes
+	
+select label,drnk,no_of_paintings
+	from (
+		select cs.size_id,cs.label,count(1) as no_of_paintings
+		, dense_rank() over(order by count(1) ) as drnk
+		from  product_size ps
+		join canvas_size cs on cs.size_id = ps.size_id
+		group by cs.size_id,cs.label) x
+	where x.drnk <=3
+	limit 3;
+
+
+--Question 15: Identify the museums that opens on 'Sunday' and 'Monday': 28 museums: MOMA, Pushkin State, National 
+
+select m."name", m.city, mh."day"
+from museum_hours mh 
+join museum m on mh.museum_id = m.museum_id 
+where mh."day" ='Sunday' --56
+and exists (select 1 from museum_hours mh2 
+			where mh2.museum_id = mh.museum_id 
+			and mh2."day" ='Monday')
+			
+			
+--Question 16: Which museum is open longest during the day? Musee du Louvre, Paris, 12 hours and 45 mins open, 1st rank.
+			
+select * from(select m."name", m.state, mh."day", 
+		to_timestamp(mh."open", 'HH:MI AM') as museum_open,
+		to_timestamp(mh."close", 'HH:MI PM') as museum_close,
+		to_timestamp(mh."close", 'HH:MI PM') - to_timestamp(mh."open", 'HH:MI AM') as museum_otime,
+		rank() over(order by(to_timestamp(mh."close", 'HH:MI PM') - to_timestamp(mh."open", 'HH:MI AM')) desc) as ranked
+from museum_hours mh 
+join museum m on mh.museum_id = m.museum_id) x
+where x.ranked =1;
+
+
+--Question 17: Return the coutry with the most museums and the city with the most museums:
+with cte_country as(
+	select country, count(1),
+	rank() over(order by count(1) desc) as country_rnk
+	from museum
+	group by country), 
+	cte_city as(
+	select city, count(1),
+	rank() over(order by count(1) desc) as city_rnk
+	from museum
+	group by city)
+select distinct country, city
+from cte_country  
+cross join cte_city 
+where cte_country.country_rnk = 1 
+and cte_city.city_rnk = 1;
+
+--Question 18: Which museum has the most no of most popular painting style?  -- Metropolitan museum. holding 224 Impressionist paintings
+
+with pop_style as 
+			(select style
+			,rank() over(order by count(1) desc) as rnk
+			from workdata 
+			group by style),
+		cte as
+			(select w.museum_id,m.name as museum_name,ps.style, count(1) as no_paintings
+			,rank() over(order by count(1) desc) as rnk
+			from workdata w
+			join museum m on m.museum_id=w.museum_id
+			join pop_style ps on ps.style = w.style
+			where w.museum_id is not null
+			and ps.rnk=1
+			group by w.museum_id, m.name,ps.style)
+	select museum_name,style,no_paintings
+	from cte 
+	where rnk=1;
+
+
